@@ -1,0 +1,263 @@
+# =============================================================================
+# Airflow Docker Compose — MASTER
+# CeleryExecutor + PostgreSQL (metadata DB) + Redis (broker) + Flower
+# =============================================================================
+# Servicios: postgres, redis, airflow-init, airflow-webserver,
+#            airflow-scheduler, flower.
+# Los workers se levantan en otros servidores con worker/docker-compose.yml.
+# Todas las variables se definen en master/.env (copiar desde .env.example).
+# =============================================================================
+
+x-airflow-common:
+  &airflow-common
+
+  build:
+    context: .
+    args:
+      AIRFLOW_VERSION: ${AIRFLOW_VERSION:-2.9.3}
+      PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+
+  image: ${AIRFLOW_IMAGE_NAME:-airflow-celery:2.9.3}
+
+  user: "${AIRFLOW_UID:-50000}:0"
+
+  environment:
+    &airflow-env
+
+    # ───────── Airflow Core ─────────
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Definir AIRFLOW_FERNET_KEY en .env}
+
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+
+    # ───────── Concurrencia (ver README, sección "Variables ajustables") ─────────
+    AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-32}
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: ${AIRFLOW_MAX_ACTIVE_TASKS_PER_DAG:-16}
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: ${AIRFLOW_MAX_ACTIVE_RUNS_PER_DAG:-16}
+
+    # ───────── Scheduler tuning ─────────
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: ${AIRFLOW_MIN_FILE_PROCESS_INTERVAL:-30}
+
+    # ───────── Webserver ─────────
+    AIRFLOW__WEBSERVER__WORKERS: ${AIRFLOW_WEBSERVER_WORKERS:-2}
+    AIRFLOW__WEBSERVER__BASE_URL: ${AIRFLOW_BASE_URL:-http://localhost:8080}
+    # Debe ser IDÉNTICA en master y en todos los workers (firma de la petición
+    # de logs entre webserver y worker). Ver docs/adr/0001.
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?Definir AIRFLOW_SECRET_KEY en .env}
+
+    # ───────── SMTP alertas ─────────
+    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW_SMTP_HOST:-localhost}
+    AIRFLOW__SMTP__SMTP_PORT: ${AIRFLOW_SMTP_PORT:-587}
+    AIRFLOW__SMTP__SMTP_STARTTLS: ${AIRFLOW_SMTP_STARTTLS:-True}
+    AIRFLOW__SMTP__SMTP_SSL: ${AIRFLOW_SMTP_SSL:-False}
+    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW_SMTP_USER:-}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW_SMTP_PASSWORD:-}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW_SMTP_MAIL_FROM:-}
+
+    # ───────── Flower ─────────
+    # Formato "usuario:clave". Vacío = sin autenticación (ver docs/flower.md).
+    AIRFLOW__CELERY__FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-}
+
+    # ───────── Extra packages ─────────
+    # Deshabilitado a propósito: las librerías nuevas van en requirements.txt
+    # y se reconstruye la imagen (docker compose build).
+    # _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+
+  # :z (minúscula) = etiqueta SELinux compartida entre contenedores.
+  # Sin efecto si SELinux está deshabilitado. Ver docs/adr/0005.
+  volumes:
+    - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/dags:/opt/airflow/dags:z
+    - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/logs:/opt/airflow/logs:z
+    - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/plugins:/opt/airflow/plugins:z
+    - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/postgres_backup:/data/postgres_backup:z
+    - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/ssh:/home/airflow/.ssh:z
+
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+  restart: always
+
+services:
+
+  # =============================================================================
+  # Flower (monitoreo de workers y colas Celery)
+  # =============================================================================
+
+  flower:
+    <<: *airflow-common
+    command: celery flower
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # =============================================================================
+  # Redis (broker Celery)
+  # =============================================================================
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # =============================================================================
+  # PostgreSQL (metadata DB + result backend Celery)
+  # =============================================================================
+
+  postgres:
+
+    image: ${POSTGRES_IMAGE:-postgres:14}
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Definir POSTGRES_USER en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Definir POSTGRES_DB en .env}
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    # Datos locales del master: NO deben estar en el export NFS.
+    volumes:
+      - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/postgres:/var/lib/postgresql/data:z
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+    restart: always
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # =============================================================================
+  # Airflow Init (migra la metadata DB y crea el usuario admin)
+  # =============================================================================
+  # Corre una sola vez por "docker compose up". Si "db migrate" falla, el
+  # contenedor termina con error y webserver/scheduler/flower NO arrancan
+  # (dependen de service_completed_successfully). Ver docs/adr/0006.
+
+  airflow-init:
+
+    <<: *airflow-common
+
+    restart: "no"
+
+    environment:
+      <<: *airflow-env
+      _ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Definir AIRFLOW_ADMIN_USER en .env}
+      _ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Definir AIRFLOW_ADMIN_PASSWORD en .env}
+      _ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+
+    # $$ = la variable la expande bash dentro del contenedor, no docker compose.
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        if airflow users list --output plain | awk '{print $$2}' | grep -qx "$${_ADMIN_USER}"; then
+          echo "Usuario admin '$${_ADMIN_USER}' ya existe, no se crea."
+        else
+          airflow users create \
+            --username "$${_ADMIN_USER}" \
+            --password "$${_ADMIN_PASSWORD}" \
+            --firstname Admin \
+            --lastname User \
+            --role Admin \
+            --email "$${_ADMIN_EMAIL}"
+        fi
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # =============================================================================
+  # Airflow Webserver
+  # =============================================================================
+
+  airflow-webserver:
+
+    <<: *airflow-common
+
+    command: webserver
+
+    ports:
+      - "${AIRFLOW_WEBSERVER_PORT:-8080}:8080"
+
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # =============================================================================
+  # Airflow Scheduler
+  # =============================================================================
+
+  airflow-scheduler:
+
+    <<: *airflow-common
+
+    command: scheduler
+
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+    deploy:
+      resources:
+        limits:
+          cpus: '3.0'
+          memory: 3G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"

@@ -1,0 +1,19 @@
+# Secretos: solo se versionan los .env.example
+.env
+*.env
+!.env.example
+
+# Imágenes exportadas con docker save (no es un registry)
+*.tar
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+
+# Archivo generado por el DAG de prueba
+dags/ultimo_run.txt
+
+# Contexto local de Claude Code (contiene datos del entorno real)
+CLAUDE.md
+.claude/

@@ -1,0 +1,23 @@
+# =============================================================================
+# Override opcional: Oracle Instant Client en el worker
+# =============================================================================
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d
+#
+# Requiere en el host:
+#   - Instant Client descomprimido en ORACLE_HOST_LIB_DIR
+#     (debe contener la carpeta indicada en ORACLE_CLIENT_LIB_DIR)
+#   - tnsnames.ora / sqlnet.ora en ORACLE_HOST_TNS_DIR
+# =============================================================================
+
+services:
+
+  airflow-worker:
+
+    environment:
+      ORACLE_CLIENT_LIB_DIR: ${ORACLE_CLIENT_LIB_DIR:-/usr/lib/oracle/instantclient_23_26}
+      TNS_ADMIN: /opt/oracle
+
+    volumes:
+      - ${ORACLE_HOST_TNS_DIR:-/opt/oracle}:/opt/oracle:ro,z
+      - ${ORACLE_HOST_LIB_DIR:-/usr/lib/oracle}:/usr/lib/oracle:ro,z

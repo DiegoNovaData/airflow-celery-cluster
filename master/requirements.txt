@@ -1,0 +1,38 @@
+# Todas las versiones van fijas (==) para que la imagen sea reproducible.
+# Se instalan junto con apache-airflow==<versión> para que pip no cambie Airflow.
+
+# PostgreSQL
+psycopg2-binary==2.9.11
+
+# MySQL
+mysql-connector-python==8.3.0
+
+# Data
+numpy==1.26.4
+pandas==2.1.4
+pyarrow==17.0.0
+openpyxl==3.1.5
+
+# Geoespacial
+h3==4.1.0
+geopandas==1.0.1
+GeoAlchemy2==0.15.2
+shapely==2.0.7
+pyproj==3.6.1
+pyogrio==0.11.1
+
+# Configuración
+toml==0.10.2
+
+# Utilidades
+python-dateutil==2.9.0
+pytz==2024.1
+
+# Fijar SQLAlchemy a la versión compatible con Airflow 2.9.x
+# geopandas instala SQLAlchemy 2.x como dependencia, lo que rompe Airflow
+SQLAlchemy==1.4.52
+
+python-dotenv==1.0.1
+
+# Calidad de datos (antes ">=1.0.0", sin versión fija)
+great-expectations==1.23.2

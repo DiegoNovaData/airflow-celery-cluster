@@ -1,0 +1,100 @@
+# =============================================================================
+# Airflow Docker Compose — WORKER (Celery)
+# =============================================================================
+# Un solo servicio: airflow-worker. Se conecta al Redis y al PostgreSQL que
+# corren en el master (MASTER_HOST). No levanta postgres, redis, webserver
+# ni scheduler: esos viven solo en el master.
+#
+# Requisitos en este servidor:
+#   - DAGs, logs y plugins montados por NFS desde el master en AIRFLOW_DATA_DIR
+#     (ver docs/nfs.md).
+#   - worker/.env creado desde .env.example, con las MISMAS claves
+#     (FERNET/SECRET) y credenciales de Postgres que el master.
+#
+# Oracle Instant Client (opcional):
+#   docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d
+# =============================================================================
+
+services:
+
+  airflow-worker:
+
+    # Misma imagen que el master. Se construye desde ../master/Dockerfile
+    # (multi-arquitectura: en un servidor arm64 se construye nativa).
+    # Si la imagen ya existe localmente (p. ej. cargada con docker load),
+    # "docker compose up" la usa sin reconstruir.
+    build:
+      context: ../master
+      args:
+        AIRFLOW_VERSION: ${AIRFLOW_VERSION:-2.9.3}
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+
+    image: ${AIRFLOW_IMAGE_NAME:-airflow-celery:2.9.3}
+
+    user: "${AIRFLOW_UID:-50000}:0"
+
+    # Red del host: el worker queda registrado con el hostname real del
+    # servidor y el webserver puede pedirle los logs en vivo por el puerto
+    # 8793 sin mapear puertos. Ver docs/adr/0007.
+    network_mode: host
+
+    command: >
+      celery worker
+      --queues ${WORKER_QUEUES:-default}
+      --concurrency ${WORKER_CONCURRENCY:-16}
+
+    environment:
+
+      # ───────── Airflow Core ─────────
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Definir AIRFLOW_FERNET_KEY en .env (igual al master)}
+
+      # ───────── Conexión al master ─────────
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:?Definir POSTGRES_USER en .env}:${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}@${MASTER_HOST:?Definir MASTER_HOST en .env}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://${MASTER_HOST}:${REDIS_PORT:-6379}/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${MASTER_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+
+      # ───────── Logs ─────────
+      # Debe ser IDÉNTICA a la del master (firma de la petición de logs).
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?Definir AIRFLOW_SECRET_KEY en .env (igual al master)}
+      AIRFLOW__LOGGING__WORKER_LOG_SERVER_PORT: ${WORKER_LOG_SERVER_PORT:-8793}
+
+      # ───────── SMTP (email_on_failure se envía desde el worker) ─────────
+      AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW_SMTP_HOST:-localhost}
+      AIRFLOW__SMTP__SMTP_PORT: ${AIRFLOW_SMTP_PORT:-587}
+      AIRFLOW__SMTP__SMTP_STARTTLS: ${AIRFLOW_SMTP_STARTTLS:-True}
+      AIRFLOW__SMTP__SMTP_SSL: ${AIRFLOW_SMTP_SSL:-False}
+      AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW_SMTP_USER:-}
+      AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW_SMTP_PASSWORD:-}
+      AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW_SMTP_MAIL_FROM:-}
+
+      # Necesario para que Celery haga "warm shutdown" (termina las tareas en
+      # curso) al recibir SIGTERM con docker compose down / restart.
+      DUMB_INIT_SETSID: "0"
+
+    # :z = etiqueta SELinux compartida (sin efecto si SELinux está deshabilitado)
+    volumes:
+      # Compartidos por NFS desde el master
+      - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/dags:/opt/airflow/dags:z
+      - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/logs:/opt/airflow/logs:z
+      - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/plugins:/opt/airflow/plugins:z
+      # Local de este servidor (llaves para SSHOperator)
+      - ${AIRFLOW_DATA_DIR:-/app/dockerdata/airflow}/ssh:/home/airflow/.ssh:z
+
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    restart: always
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
