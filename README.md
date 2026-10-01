@@ -51,13 +51,12 @@ Detalle conceptual en [docs/arquitectura.md](docs/arquitectura.md).
 airflow-celery-cluster/
 ├── master/
 │   ├── Dockerfile              # imagen única (master y workers), multi-arquitectura
-│   ├── entrypoint.sh           # prepara Oracle Instant Client si está montado
+│   ├── cluster_hostname.py     # el worker se anuncia con su IP (WORKER_IP)
 │   ├── requirements.txt        # librerías Python, todas con versión fija
 │   ├── docker-compose.yml      # postgres, redis, init, webserver, scheduler, flower
 │   └── .env.example
 ├── worker/
-│   ├── docker-compose.yml          # celery worker que se conecta al master
-│   ├── docker-compose.oracle.yml   # override opcional para Oracle Instant Client
+│   ├── docker-compose.yml      # celery worker que se conecta al master
 │   └── .env.example
 ├── dags/
 │   └── test_worker_rapido.py   # DAG de humo para validar workers y NFS
@@ -116,7 +115,9 @@ min( AIRFLOW_PARALLELISM ,  Σ WORKER_CONCURRENCY de los workers ,  slots del po
 | `AIRFLOW_UID` | master y worker | UID con el que corren los contenedores. Debe ser **el mismo en todos los servidores** y ser dueño de `AIRFLOW_DATA_DIR`; si no, aparecen errores de permisos en logs y DAGs sobre NFS. |
 | `AIRFLOW_DATA_DIR` | master y worker | Carpeta base en el host. Debe tener la misma ruta en todos los servidores. |
 | `AIRFLOW_BASE_URL` | master | URL pública de la UI. Se usa en los enlaces de los correos de alerta. |
-| `MASTER_HOST` | worker | Host o IP del master, donde están Redis y PostgreSQL. |
+| `MASTER_IP` | master y worker | IP del master. En el master, los puertos 8080, 5555, 6379 y 5432 se publican **solo** en esa IP. En el worker, es la dirección de Redis y PostgreSQL. |
+| `WORKER_IPS` | master | IPs de todos los workers, separadas por coma. Las usan los comandos de firewall y NFS de `docs/`. |
+| `WORKER_IP` | worker | IP de **ese** worker. Airflow la guarda como hostname de cada tarea, y el webserver pide los logs en vivo a `http://WORKER_IP:8793`, sin DNS. |
 | `AIRFLOW_VERSION` / `PYTHON_VERSION` | master y worker | Versión de la imagen base y del archivo de constraints. Deben coincidir en todo el cluster. |
 | `AIRFLOW_IMAGE_NAME` | master y worker | Nombre y tag de la imagen construida. |
 | `*_PORT` | master y worker | Puertos publicados (webserver, flower, redis, postgres, log server del worker). |
@@ -138,9 +139,10 @@ min( AIRFLOW_PARALLELISM ,  Σ WORKER_CONCURRENCY de los workers ,  slots del po
 
 ```bash
 git clone <este-repo> && cd airflow-celery-cluster/master
-cp .env.example .env            # completar todos los "changeme" y generar las claves
-sudo mkdir -p /app/dockerdata/airflow/{dags,logs,plugins,postgres,postgres_backup,ssh}
-sudo chown -R <AIRFLOW_UID>:0 /app/dockerdata/airflow
+cp .env.example .env            # MASTER_IP, WORKER_IPS, "changeme" y claves
+set -a; source .env; set +a
+sudo mkdir -p "${AIRFLOW_DATA_DIR}"/{dags,logs,plugins,postgres,postgres_backup,ssh}
+sudo chown -R "${AIRFLOW_UID}:0" "${AIRFLOW_DATA_DIR}"
 docker compose build
 docker compose up -d
 docker compose ps                # airflow-init debe quedar "exited (0)"
@@ -149,11 +151,11 @@ docker compose ps                # airflow-init debe quedar "exited (0)"
 Después, configura el export NFS y copia el DAG de prueba:
 
 ```bash
-cp ../dags/test_worker_rapido.py /app/dockerdata/airflow/dags/
+cp ../dags/test_worker_rapido.py "${AIRFLOW_DATA_DIR}/dags/"
 ```
 
-- UI: `http://<master>:8080`
-- Flower: `http://<master>:5555`
+- UI: `http://<MASTER_IP>:8080`
+- Flower: `http://<MASTER_IP>:5555`
 
 Si `airflow-init` termina con error, el webserver, el scheduler y Flower **no arrancan**
 a propósito. Revisa la causa con `docker compose logs airflow-init`.
@@ -163,7 +165,7 @@ a propósito. Revisa la causa con `docker compose logs airflow-init`.
 ```bash
 # en el servidor worker, con el NFS ya montado (docs/nfs.md)
 git clone <este-repo> && cd airflow-celery-cluster/worker
-cp .env.example .env            # MASTER_HOST, mismas claves y credenciales que el master
+cp .env.example .env            # MASTER_IP, WORKER_IP, mismas claves y credenciales que el master
 ```
 
 Elige cómo obtener la imagen según la arquitectura del worker:
@@ -177,8 +179,6 @@ Verifica la arquitectura con `uname -m` (`x86_64` o `aarch64`).
 
 ```bash
 docker compose up -d
-# con Oracle Instant Client:
-docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d
 docker compose ps                # airflow-worker debe quedar "healthy"
 ```
 
@@ -190,7 +190,7 @@ Para un worker dedicado a tareas pesadas, usa en su `.env`
 ### 3. Probar con el DAG de humo
 
 1. En la UI, activa `test_worker_rapido` y ejecútalo con **Trigger DAG**.
-2. En el log de la tarea, la primera línea es el **hostname del worker** que la ejecutó.
+2. En el log de la tarea, la primera línea es el **hostname del servidor worker** que la ejecutó. En la pestaña *Details* de la tarea, el campo *Hostname* muestra su `WORKER_IP`.
 3. Revisa el archivo desde cualquier servidor:
    `cat /app/dockerdata/airflow/dags/ultimo_run.txt`.
    Si muestra la hora de la corrida en todos, el NFS funciona.
@@ -209,6 +209,33 @@ Para un worker dedicado a tareas pesadas, usa en su `.env`
 
 Redis no tiene contraseña por defecto, así que **restringe el 6379 a las IPs de los workers**.
 Ver [docs/redis.md](docs/redis.md).
+
+Las IPs se toman del `.env`, así que no hay que escribirlas a mano en los comandos.
+
+**En el master** (`master/.env`, `WORKER_IPS`):
+
+```bash
+cd airflow-celery-cluster/master
+set -a; source .env; set +a
+for ip in ${WORKER_IPS//,/ }; do
+  for port in ${REDIS_PORT} ${POSTGRES_PORT}; do
+    sudo firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip port port=$port protocol=tcp accept"
+  done
+done
+sudo firewall-cmd --permanent --add-port=${AIRFLOW_WEBSERVER_PORT}/tcp
+sudo firewall-cmd --reload
+```
+
+Las reglas de NFS están en [docs/nfs.md](docs/nfs.md) y las de Flower, en [docs/flower.md](docs/flower.md).
+
+**En cada worker** (`worker/.env`, `MASTER_IP`):
+
+```bash
+cd airflow-celery-cluster/worker
+set -a; source .env; set +a
+sudo firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=${MASTER_IP} port port=${WORKER_LOG_SERVER_PORT} protocol=tcp accept"
+sudo firewall-cmd --reload
+```
 
 ## Documentación
 

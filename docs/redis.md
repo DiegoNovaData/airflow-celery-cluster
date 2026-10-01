@@ -14,7 +14,8 @@ hay que instalar nada en el sistema operativo.
 | Imagen | `REDIS_IMAGE` (default `redis:7`) | `master/.env` |
 | Puerto publicado | `REDIS_PORT` (default `6379`) | `master/.env` |
 | URL en el master | `redis://redis:6379/0` (red interna de compose) | `master/docker-compose.yml` |
-| URL en los workers | `redis://${MASTER_HOST}:${REDIS_PORT}/0` | `worker/docker-compose.yml` |
+| URL en los workers | `redis://${MASTER_IP}:${REDIS_PORT}/0` | `worker/docker-compose.yml` |
+| IP publicada | `MASTER_IP` (el puerto no escucha en otras interfaces) | `master/.env` |
 | Autenticación | Ninguna. Ver [ADR-0009](adr/0009-redis-sin-password-por-defecto.md) | — |
 | Persistencia | Ninguna (solo en memoria) | — |
 
@@ -29,19 +30,21 @@ sudo sysctl --system
 
 ## Firewall: obligatorio
 
-Como no hay contraseña, el puerto 6379 debe quedar abierto **solo a los workers**:
+Como no hay contraseña, el puerto 6379 debe quedar abierto **solo a los workers**. Las IPs se
+toman de `WORKER_IPS` en `master/.env`:
 
 ```bash
-for ip in 192.0.2.41 192.0.2.42; do
-  sudo firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip port port=6379 protocol=tcp accept"
+cd airflow-celery-cluster/master
+set -a; source .env; set +a
+for ip in ${WORKER_IPS//,/ }; do
+  sudo firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip port port=${REDIS_PORT} protocol=tcp accept"
 done
 sudo firewall-cmd --reload
 ```
 
 Docker publica los puertos con sus propias reglas de iptables, que pueden saltarse firewalld.
-Para estar seguro, publica el puerto solo en la IP interna del master: en el compose,
-`"192.0.2.10:6379:6379"` en lugar de `"6379:6379"`. Otra opción es filtrar en la cadena
-`DOCKER-USER`.
+Por eso el compose publica Redis solo en `MASTER_IP` (`"${MASTER_IP}:6379:6379"`) y no en todas
+las interfaces. Para filtrar por IP de origen a nivel de Docker, usa la cadena `DOCKER-USER`.
 
 ## Persistencia (opcional)
 
@@ -84,7 +87,7 @@ Si prefieres no esperar ese tiempo, activa AOF en el servicio `redis`:
 3. En `worker/docker-compose.yml`:
 
    ```yaml
-         AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD}@${MASTER_HOST}:${REDIS_PORT:-6379}/0
+         AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD}@${MASTER_IP}:${REDIS_PORT:-6379}/0
    ```
 
 4. Reinicia el master y luego cada worker: `docker compose up -d`.
@@ -97,8 +100,8 @@ Si prefieres no esperar ese tiempo, activa AOF en el servicio `redis`:
 docker compose exec redis redis-cli ping                # PONG
 docker compose exec redis redis-cli LLEN default        # tareas esperando en la cola "default"
 
-# desde un worker: valida red y firewall
-docker run --rm redis:7 redis-cli -h 192.0.2.10 -p 6379 ping   # PONG
+# desde un worker: valida red y firewall (con worker/.env cargado)
+docker run --rm redis:7 redis-cli -h "${MASTER_IP}" -p "${REDIS_PORT}" ping   # PONG
 ```
 
 Si `LLEN` crece sin parar, ningún worker está atendiendo esa cola. Revisa `WORKER_QUEUES` y Flower.

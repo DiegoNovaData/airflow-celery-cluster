@@ -5,6 +5,7 @@
 # Servicios: postgres, redis, airflow-init, airflow-webserver,
 #            airflow-scheduler, flower.
 # Los workers se levantan en otros servidores con worker/docker-compose.yml.
+# Los puertos se publican solo en MASTER_IP (no en 0.0.0.0). Ver docs/adr/0011.
 # Todas las variables se definen en master/.env (copiar desde .env.example).
 # =============================================================================
 
@@ -94,7 +95,7 @@ services:
     <<: *airflow-common
     command: celery flower
     ports:
-      - "${FLOWER_PORT:-5555}:5555"
+      - "${MASTER_IP:?Definir MASTER_IP en .env}:${FLOWER_PORT:-5555}:5555"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -107,7 +108,7 @@ services:
   redis:
     image: ${REDIS_IMAGE:-redis:7}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${MASTER_IP}:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -129,7 +130,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Definir POSTGRES_DB en .env}
 
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${MASTER_IP}:${POSTGRES_PORT:-5432}:5432"
 
     # Datos locales del master: NO deben estar en el export NFS.
     volumes:
@@ -216,7 +217,7 @@ services:
     command: webserver
 
     ports:
-      - "${AIRFLOW_WEBSERVER_PORT:-8080}:8080"
+      - "${MASTER_IP}:${AIRFLOW_WEBSERVER_PORT:-8080}:8080"
 
     depends_on:
       <<: *airflow-common-depends-on

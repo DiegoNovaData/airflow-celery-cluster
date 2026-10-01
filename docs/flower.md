@@ -7,7 +7,7 @@ requiere instalación aparte.
 
 ## Acceso
 
-- URL: `http://<master>:${FLOWER_PORT}` (default `5555`).
+- URL: `http://${MASTER_IP}:${FLOWER_PORT}` (default `5555`).
 - Login: el valor de `FLOWER_BASIC_AUTH` en `master/.env`, con formato `usuario:clave`.
   Para varios usuarios, sepáralos con coma: `admin:clave1,ops:clave2`.
 
@@ -38,7 +38,7 @@ sudo firewall-cmd --reload
 
 | Síntoma | Revisar |
 |---|---|
-| Un worker no aparece | `docker compose logs airflow-worker` en el worker. Valida `MASTER_HOST`, `REDIS_PORT` y el firewall del 6379 (ver [redis.md](redis.md)). |
+| Un worker no aparece | `docker compose logs airflow-worker` en el worker. Valida `MASTER_IP`, `REDIS_PORT` y el firewall del 6379 (ver [redis.md](redis.md)). |
 | Worker *Offline* después de reiniciar el master | Normal durante unos segundos: Celery se reconecta solo. |
 | Tareas en `queued` en Airflow y la cola crece en Flower | No hay worker para esa cola (`WORKER_QUEUES`) o todos están llenos (`WORKER_CONCURRENCY`). |
 | Tareas en `queued` en Airflow y la cola vacía en Flower | El límite está antes del broker: `AIRFLOW_PARALLELISM`, pools o `MAX_ACTIVE_TASKS_PER_DAG`. Ver el README. |
@@ -48,5 +48,5 @@ sudo firewall-cmd --reload
 Flower expone una API REST, útil para monitoreo externo:
 
 ```bash
-curl -s -u admin:una_clave_larga http://<master>:5555/api/workers | python3 -m json.tool
+curl -s -u "${FLOWER_BASIC_AUTH}" "http://${MASTER_IP}:${FLOWER_PORT}/api/workers" | python3 -m json.tool
 ```

@@ -1,6 +1,6 @@
 # ADR-0003: Mantener dumb-init como PID 1
 
-- **Estado:** Aceptado
+- **Estado:** Reemplazado por [ADR-0010](0010-sin-soporte-oracle.md). Ya no hay entrypoint propio: se usa el oficial, que incluye dumb-init.
 - **Fecha:** 2026-10-01
 
 ## Contexto

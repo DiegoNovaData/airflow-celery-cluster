@@ -5,6 +5,7 @@
 # docker-compose (.env). Ambas se usan para el tag base y para el archivo de
 # constraints, así nunca quedan desalineadas.
 # Imagen multi-arquitectura: el mismo Dockerfile construye amd64 y arm64.
+# Se conserva el ENTRYPOINT oficial (dumb-init + /entrypoint).
 
 ARG AIRFLOW_VERSION=2.9.3
 ARG PYTHON_VERSION=3.12
@@ -14,16 +15,6 @@ FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
 # Los ARG declarados antes de FROM no son visibles después; se redeclaran.
 ARG AIRFLOW_VERSION
 ARG PYTHON_VERSION
-
-USER root
-# libaio1: requerida por Oracle Instant Client (opcional, ver worker/docker-compose.oracle.yml)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libaio1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-COPY entrypoint.sh /custom-entrypoint.sh
-RUN chmod +x /custom-entrypoint.sh
-USER airflow
 
 # Providers horneados en la imagen, resueltos con los constraints oficiales
 RUN pip install --no-cache-dir \
@@ -37,6 +28,6 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" -r /requirements.txt
 
-# dumb-init es el PID 1 de la imagen oficial: reenvía señales y recoge procesos
-# zombie. Se mantiene delante del entrypoint propio (ver docs/adr/0003).
-ENTRYPOINT ["/usr/bin/dumb-init", "--", "/custom-entrypoint.sh"]
+# Hostname que el worker anuncia (su IP, desde WORKER_IP). $AIRFLOW_HOME/config
+# está en el sys.path de Airflow. Ver docs/adr/0011.
+COPY --chown=airflow:root cluster_hostname.py /opt/airflow/config/cluster_hostname.py

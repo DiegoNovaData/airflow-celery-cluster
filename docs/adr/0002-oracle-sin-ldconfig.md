@@ -1,6 +1,6 @@
 # ADR-0002: Oracle Instant Client con LD_LIBRARY_PATH en lugar de ldconfig
 
-- **Estado:** Aceptado
+- **Estado:** Reemplazado por [ADR-0010](0010-sin-soporte-oracle.md)
 - **Fecha:** 2026-10-01
 
 ## Contexto

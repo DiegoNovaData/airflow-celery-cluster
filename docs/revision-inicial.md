@@ -1,4 +1,4 @@
-# Revisión inicial: de la configuración en producción a la v1.0.0
+# Revisión inicial: de la configuración en producción a la v1.0.0 (y siguientes)
 
 Este documento cuenta el punto de partida del proyecto. Los archivos venían de un cluster en
 producción, ya sanitizados: sin IPs ni credenciales. Antes de publicarlos se auditaron, y esta es
@@ -13,7 +13,7 @@ la lista de hallazgos con lo que se hizo con cada uno. El detalle de cada cambio
 |---|---|---|---|
 | 1 | `AIRFLOW__CORE__PARALLELISM: 4` limitaba **todo el cluster** a 4 tareas simultáneas, sin importar el número de workers. Era un valor heredado de un despliegue con un solo servidor. | ✅📘 | Pasa a `AIRFLOW_PARALLELISM` (default 32) y se explica en el README. [ADR-0008](adr/0008-configuracion-por-env.md) |
 | 2 | Faltaba `AIRFLOW__WEBSERVER__SECRET_KEY`. Cada contenedor generaba una distinta, y los logs en vivo daban 403. | ✅ | `AIRFLOW_SECRET_KEY` obligatoria y la misma en todo el cluster. [ADR-0001](adr/0001-secret-key-compartida.md) |
-| 3 | `entrypoint.sh` intentaba `ldconfig` sin privilegios y fallaba en silencio. | ✅ | `LD_LIBRARY_PATH`, sin `sudo`. [ADR-0002](adr/0002-oracle-sin-ldconfig.md) |
+| 3 | `entrypoint.sh` intentaba `ldconfig` sin privilegios y fallaba en silencio. | ✅ | En 1.0.0 se corrigió con `LD_LIBRARY_PATH` y sin `sudo` ([ADR-0002](adr/0002-oracle-sin-ldconfig.md)). En 2.0.0 se eliminó el soporte de Oracle y, con él, el entrypoint propio ([ADR-0010](adr/0010-sin-soporte-oracle.md)). |
 | 4 | El webserver y el scheduler no esperaban a `airflow-init`, y `\|\| true` ocultaba los fallos de `db migrate`. | ✅ | `set -e` y `service_completed_successfully`. [ADR-0006](adr/0006-airflow-init-como-compuerta.md) |
 | 5 | Volúmenes `:Z` (etiqueta privada) en carpetas que montan varios contenedores. | ✅ | `:z`. En origen no fallaba porque SELinux estaba deshabilitado. [ADR-0005](adr/0005-etiqueta-selinux-compartida.md) |
 
@@ -23,7 +23,7 @@ la lista de hallazgos con lo que se hizo con cada uno. El detalle de cada cambio
 |---|---|---|---|
 | 6 | Redis expuesto en el 6379 sin contraseña. | ⏳📘 | Se mitiga con firewall y el procedimiento de `requirepass` está documentado. [ADR-0009](adr/0009-redis-sin-password-por-defecto.md), [redis.md](redis.md) |
 | 7 | `requirements.txt` sin restricciones y `great-expectations>=1.0.0`. | ✅ | Versiones exactas, instaladas junto con `apache-airflow==<versión>`. [ADR-0004](adr/0004-dependencias-reproducibles.md) |
-| 8 | El `ENTRYPOINT` propio eliminaba `dumb-init`. | ✅ | `dumb-init` vuelve a ser PID 1. [ADR-0003](adr/0003-dumb-init-como-pid1.md) |
+| 8 | El `ENTRYPOINT` propio eliminaba `dumb-init`. | ✅ | En 1.0.0, `dumb-init` volvió a ser PID 1 ([ADR-0003](adr/0003-dumb-init-como-pid1.md)). Desde 2.0.0 se usa el entrypoint oficial. |
 | 9 | SMTP escrito en el compose, con un puerto no numérico. | ✅📘 | Todo el SMTP se configura en `.env`. |
 
 ## Cosméticos

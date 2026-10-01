@@ -3,6 +3,31 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 versionado [SemVer](https://semver.org/lang/es/).
 
+## [2.0.0] - 2026-10-01
+
+### Añadido
+- `MASTER_IP` (master y worker), `WORKER_IPS` (master) y `WORKER_IP` (worker) en los `.env`.
+  [ADR-0011](docs/adr/0011-ips-del-cluster-en-env.md)
+- `master/cluster_hostname.py`: el worker registra sus tareas con `WORKER_IP` como hostname, así
+  el webserver le pide los logs en vivo sin DNS ni `/etc/hosts`.
+- Los comandos de firewall y NFS de README, `docs/nfs.md`, `docs/redis.md` y `docs/flower.md`
+  leen las IPs y rutas del `.env` en lugar de usar valores escritos a mano.
+- Drop-in de systemd para que Docker espere los montajes NFS, generado desde `AIRFLOW_DATA_DIR`.
+- ADR-0010 y ADR-0011.
+
+### Cambiado
+- Los puertos del master (8080, 5555, 6379, 5432) se publican solo en `MASTER_IP`, no en `0.0.0.0`.
+- `AIRFLOW_BASE_URL` se arma por defecto con `http://${MASTER_IP}:${AIRFLOW_WEBSERVER_PORT}`.
+- `Dockerfile`: vuelve al `ENTRYPOINT` oficial (`dumb-init` + `/entrypoint`).
+- El estado de ADR-0002 y ADR-0003 pasa a "Reemplazado por ADR-0010", y ADR-0007 se marca como
+  modificado por ADR-0010 y ADR-0011.
+
+### Eliminado
+- Todo el soporte de Oracle Instant Client: `master/entrypoint.sh`, `worker/docker-compose.oracle.yml`,
+  `libaio1` en la imagen y las variables `ORACLE_*` y `TNS_ADMIN`.
+  [ADR-0010](docs/adr/0010-sin-soporte-oracle.md)
+- `MASTER_HOST`, reemplazada por `MASTER_IP`.
+
 ## [1.0.0] - 2026-10-01
 
 Primera versión publicable. Parte de la configuración en producción (0.1.0), ya sanitizada,

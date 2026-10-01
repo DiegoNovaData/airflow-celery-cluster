@@ -2,7 +2,7 @@
 # Airflow Docker Compose — WORKER (Celery)
 # =============================================================================
 # Un solo servicio: airflow-worker. Se conecta al Redis y al PostgreSQL que
-# corren en el master (MASTER_HOST). No levanta postgres, redis, webserver
+# corren en el master (MASTER_IP). No levanta postgres, redis, webserver
 # ni scheduler: esos viven solo en el master.
 #
 # Requisitos en este servidor:
@@ -10,9 +10,6 @@
 #     (ver docs/nfs.md).
 #   - worker/.env creado desde .env.example, con las MISMAS claves
 #     (FERNET/SECRET) y credenciales de Postgres que el master.
-#
-# Oracle Instant Client (opcional):
-#   docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d
 # =============================================================================
 
 services:
@@ -33,9 +30,8 @@ services:
 
     user: "${AIRFLOW_UID:-50000}:0"
 
-    # Red del host: el worker queda registrado con el hostname real del
-    # servidor y el webserver puede pedirle los logs en vivo por el puerto
-    # 8793 sin mapear puertos. Ver docs/adr/0007.
+    # Red del host: el log server (8793) queda en la IP real del servidor sin
+    # mapear puertos. Ver docs/adr/0007.
     network_mode: host
 
     command: >
@@ -51,9 +47,16 @@ services:
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Definir AIRFLOW_FERNET_KEY en .env (igual al master)}
 
       # ───────── Conexión al master ─────────
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:?Definir POSTGRES_USER en .env}:${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}@${MASTER_HOST:?Definir MASTER_HOST en .env}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
-      AIRFLOW__CELERY__BROKER_URL: redis://${MASTER_HOST}:${REDIS_PORT:-6379}/0
-      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${MASTER_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:?Definir POSTGRES_USER en .env}:${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}@${MASTER_IP:?Definir MASTER_IP en .env}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://${MASTER_IP}:${REDIS_PORT:-6379}/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${MASTER_IP}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+
+      # ───────── Identidad del worker ─────────
+      # Cada tarea queda registrada con WORKER_IP como hostname; el webserver
+      # pide los logs en vivo a http://WORKER_IP:8793 sin necesitar DNS.
+      # Ver docs/adr/0011 y master/cluster_hostname.py.
+      AIRFLOW__CORE__HOSTNAME_CALLABLE: cluster_hostname.get_hostname
+      AIRFLOW_ADVERTISED_HOST: ${WORKER_IP:?Definir WORKER_IP en .env}
 
       # ───────── Logs ─────────
       # Debe ser IDÉNTICA a la del master (firma de la petición de logs).

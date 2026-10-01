@@ -1,4 +1,4 @@
 # Finales de línea LF en todo el repo: los archivos se usan en servidores Linux.
-# Evita que un clon en Windows convierta entrypoint.sh o .env a CRLF.
+# Evita que un clon en Windows convierta los scripts o los .env a CRLF.
 * text=auto eol=lf
 *.svg binary
