@@ -13,10 +13,14 @@ versionado [SemVer](https://semver.org/lang/es/).
 - Los comandos de firewall y NFS de README, `docs/nfs.md`, `docs/redis.md` y `docs/flower.md`
   leen las IPs y rutas del `.env` en lugar de usar valores escritos a mano.
 - Drop-in de systemd para que Docker espere los montajes NFS, generado desde `AIRFLOW_DATA_DIR`.
-- ADR-0010 y ADR-0011.
+- `WORKER_NAME` (worker): nombre único del worker, que es su hostname y su nombre Celery en Flower.
+- ADR-0010, ADR-0011 y ADR-0012.
 
 ### Cambiado
 - Los puertos del master (8080, 5555, 6379, 5432) se publican solo en `MASTER_IP`, no en `0.0.0.0`.
+- El worker pasa de `network_mode: host` a red bridge con `hostname: ${WORKER_NAME}` y el puerto
+  8793 publicado en `WORKER_IP`, igual que el compose de los workers de producción.
+  [ADR-0012](docs/adr/0012-worker-en-red-bridge.md)
 - `AIRFLOW_BASE_URL` se arma por defecto con `http://${MASTER_IP}:${AIRFLOW_WEBSERVER_PORT}`.
 - `Dockerfile`: vuelve al `ENTRYPOINT` oficial (`dumb-init` + `/entrypoint`).
 - El estado de ADR-0002 y ADR-0003 pasa a "Reemplazado por ADR-0010", y ADR-0007 se marca como

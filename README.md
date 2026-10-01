@@ -117,6 +117,7 @@ min( AIRFLOW_PARALLELISM ,  Σ WORKER_CONCURRENCY de los workers ,  slots del po
 | `AIRFLOW_BASE_URL` | master | URL pública de la UI. Se usa en los enlaces de los correos de alerta. |
 | `MASTER_IP` | master y worker | IP del master. En el master, los puertos 8080, 5555, 6379 y 5432 se publican **solo** en esa IP. En el worker, es la dirección de Redis y PostgreSQL. |
 | `WORKER_IPS` | master | IPs de todos los workers, separadas por coma. Las usan los comandos de firewall y NFS de `docs/`. |
+| `WORKER_NAME` | worker | Nombre **único** del worker: hostname del contenedor y `celery@WORKER_NAME` en Flower. Ejemplo: `worker-41-default`. |
 | `WORKER_IP` | worker | IP de **ese** worker. Airflow la guarda como hostname de cada tarea, y el webserver pide los logs en vivo a `http://WORKER_IP:8793`, sin DNS. |
 | `AIRFLOW_VERSION` / `PYTHON_VERSION` | master y worker | Versión de la imagen base y del archivo de constraints. Deben coincidir en todo el cluster. |
 | `AIRFLOW_IMAGE_NAME` | master y worker | Nombre y tag de la imagen construida. |
@@ -165,7 +166,7 @@ a propósito. Revisa la causa con `docker compose logs airflow-init`.
 ```bash
 # en el servidor worker, con el NFS ya montado (docs/nfs.md)
 git clone <este-repo> && cd airflow-celery-cluster/worker
-cp .env.example .env            # MASTER_IP, WORKER_IP, mismas claves y credenciales que el master
+cp .env.example .env            # MASTER_IP, WORKER_IP, WORKER_NAME, mismas claves y credenciales que el master
 ```
 
 Elige cómo obtener la imagen según la arquitectura del worker:

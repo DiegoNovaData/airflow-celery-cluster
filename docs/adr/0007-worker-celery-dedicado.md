@@ -1,6 +1,6 @@
 # ADR-0007: Worker Celery dedicado con red del host
 
-- **Estado:** Aceptado. Modificado por [ADR-0010](0010-sin-soporte-oracle.md) (Oracle) y [ADR-0011](0011-ips-del-cluster-en-env.md) (IPs y hostname).
+- **Estado:** Aceptado. Modificado por [ADR-0010](0010-sin-soporte-oracle.md) (Oracle), [ADR-0011](0011-ips-del-cluster-en-env.md) (IPs y hostname) y [ADR-0012](0012-worker-en-red-bridge.md) (red bridge).
 - **Fecha:** 2026-10-01
 
 ## Contexto
